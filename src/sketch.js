@@ -3,11 +3,7 @@ const dataKey = 'data';
 const storingDateKey = 'storingDay';
 
 let day;
-let days = [];
-let minTemperatures = [];
-let maxTemperatures = [];
-let averageTemperatures = [];
-let medianTemperatures = [];
+let daysData = []
 
 let temperatures;
 
@@ -53,47 +49,37 @@ function calculateValuesForDays() {
     } else {
       if (temperatures.length == 0) continue;
 
-      calculateThisDayValues();
+      calculateThisDayValues(day);
       newDay(i, elementDate);
     }
   }
   calculateThisDayValues();
-
-  console.log('Mins:');
-  console.log(minTemperatures);
-  console.log('Maxs:');
-  console.log(maxTemperatures);
-  console.log('Medians:');
-  console.log(medianTemperatures);
-  console.log('Averages:');
-  console.log(averageTemperatures);
 }
 
-function calculateThisDayValues() {
-  if (day == 11) console.log(temperatures)
+function calculateThisDayValues(day) {
   temperatures.sort(function(a, b){return a-b});
-  if (day == 11) console.log(temperatures)
 
-  minTemperatures.push(temperatures[0]);
-  maxTemperatures.push(temperatures[temperatures.length - 1]);
+  let minimum = temperatures[0];
+  let maximum = temperatures[temperatures.length - 1];
   let count = temperatures.length;
+  let median;
   if (count % 2 == 0) {
     let middleA = temperatures[count / 2];
     let middleB = temperatures[(count / 2) - 1];
-    medianTemperatures.push(0.5 * (middleA + middleB));
+    median = 0.5 * (middleA + middleB);
   } else {
-    medianTemperatures.push(temperatures[Math.floor(0.5 * count)]);
+    median = temperatures[Math.floor(0.5 * count)];
   }
 
   let sum = 0;
   temperatures.forEach(t => sum += t);
-  averageTemperatures.push(sum / count);
+  let average = sum / count;
+  daysData.push(new DayData(day, minimum, maximum, average, median))
 }
 
 function newDay(i, elementDate) {
   temperatures = [data['hourly']['temperature_2m'][i]];
   day = elementDate.getDate();
-  days.push(day);
 }
 
 function fetchWeatherData(){
@@ -127,33 +113,43 @@ function storeData(newData){
 
 function plotData(){
   const context = document.getElementById('weatherCanvas');
+  let chartData = daysData;
 
   new Chart(context, {
     type: 'line',
     data: {
-      labels: days,
+      labels: daysData.map(element => element.day),
       datasets: [{
-        label: 'Min',
-        data: minTemperatures,
+        label: 'Minimum',
+        data: daysData.map(element => element.minimum),
         borderWidth: 1
       },{
-        label: 'Max',
-        data: maxTemperatures,
+        label: 'Maximum',
+        data: daysData.map(element => element.maximum),
         borderWidth: 1
       },{
         label: 'Average',
-        data: averageTemperatures,
+        data: daysData.map(element => element.average),
         borderWidth: 1
       },{
         label: 'Median',
-        data: medianTemperatures,
+        data: daysData.map(element => element.median),
         borderWidth: 1
       },]
     },
     options: {
       scales: {
         y: {
-          beginAtZero: false
+          beginAtZero: false,
+          position: 'right',
+          ticks: {
+            color: '#aaaaaa',
+          }
+        },
+        x: {
+          ticks: {
+            color: '#aaaaaa',
+          }
         }
       }
     }
