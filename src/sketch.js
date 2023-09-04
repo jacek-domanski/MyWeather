@@ -4,6 +4,7 @@ const storingDateKey = 'storingDay';
 
 let day;
 let daysData = []
+let places = ['krakow', 'madeira']
 
 let temperatures;
 
@@ -53,7 +54,7 @@ function calculateValuesForDays() {
       newDay(i, elementDate);
     }
   }
-  calculateThisDayValues();
+  calculateThisDayValues(day);
 }
 
 function calculateThisDayValues(day) {
@@ -112,48 +113,55 @@ function storeData(newData){
 }
 
 function plotData(){
-  const context = document.getElementById('weatherCanvas');
-  let chartData = daysData;
+  let divContainer = document.getElementById('canvases');
+  for (let i = 0; i < places.length; i++) {
+    let canvas = document.createElement('canvas');
+    canvas.id = places[i];
+    divContainer.appendChild(canvas);
 
-  new Chart(context, {
-    type: 'line',
-    data: {
-      labels: daysData.map(element => element.day),
-      datasets: [{
-        label: 'Minimum',
-        data: daysData.map(element => element.minimum),
-        borderWidth: 1
-      },{
-        label: 'Maximum',
-        data: daysData.map(element => element.maximum),
-        borderWidth: 1
-      },{
-        label: 'Average',
-        data: daysData.map(element => element.average),
-        borderWidth: 1
-      },{
-        label: 'Median',
-        data: daysData.map(element => element.median),
-        borderWidth: 1
-      },]
-    },
-    options: {
-      scales: {
-        y: {
-          beginAtZero: false,
-          position: 'right',
-          ticks: {
-            color: '#aaaaaa',
-          }
-        },
-        x: {
-          ticks: {
-            color: '#aaaaaa',
+    const context = document.getElementById(places[i]);
+    let chartData = daysData;
+  
+    new Chart(context, {
+      type: 'line',
+      data: {
+        labels: chartData.map(element => element.day),
+        datasets: [{
+          label: 'Minimum',
+          data: chartData.map(element => element.minimum),
+          borderWidth: 1
+        },{
+          label: 'Maximum',
+          data: chartData.map(element => element.maximum),
+          borderWidth: 1
+        },{
+          label: 'Average',
+          data: chartData.map(element => element.average),
+          borderWidth: 1
+        },{
+          label: 'Median',
+          data: chartData.map(element => element.median),
+          borderWidth: 1
+        },]
+      },
+      options: {
+        scales: {
+          y: {
+            beginAtZero: false,
+            position: 'right',
+            ticks: {
+              color: '#aaaaaa',
+            }
+          },
+          x: {
+            ticks: {
+              color: '#aaaaaa',
+            }
           }
         }
       }
-    }
-  });
+    });
+  }
 }
 
 main();
