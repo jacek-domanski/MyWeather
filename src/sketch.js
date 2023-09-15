@@ -1,28 +1,30 @@
-let data;
 const dataKey = 'data';
 const storingDateKey = 'storingDay';
 
-let day;
-let daysData = []
-let places = ['krakow', 'madeira']
+let places = []
 
-let temperatures;
+async function main() {
+  places.push(new Place('Cracow', 50.0614, 19.9366));
+  places.push(new Place('Madeira', 32.795794, -16.891194));
 
-function main() {
-  data = JSON.parse(localStorage.getItem(dataKey));
+  for (let i = 0; i < places.length; i++) {
+    let place = places[i];
+    let rawData = JSON.parse(localStorage.getItem(place.name));
 
-  if (data === null || !isDataUpToDate()){
-    fetchWeatherData();
-  } else {
-    console.log('Using existing data:');
-    console.log(data);
-    calculateValuesForDays();
-    plotData();
+    if (rawData === null || !isDataUpToDate(rawData)){
+      rawData = await fetchWeatherData(place);
+      console.log('Downloading new data for ' + place.name);
+    } else {
+      console.log('Using existing data for ' + place.name);
+    }
+    console.log(rawData);
+    let daysData = calculateValuesForDays(rawData);
+    plotData(place, daysData);
   }
 }
 
-function isDataUpToDate(){
-  let lastDataDate = new Date(data['hourly']['time'][data['hourly']['time'].length-1]);
+function isDataUpToDate(rawData){
+  let lastDataDate = new Date(rawData['hourly']['time'][rawData['hourly']['time'].length-1]);
 
   let yesterday = new Date(Date.now());
   yesterday.setDate(yesterday.getDate()-1);
@@ -36,57 +38,10 @@ function isDataUpToDate(){
   return true;
 }
 
-function calculateValuesForDays() {
-  for (let i = 0; i < data['hourly']['time'].length; i++) {
-    const element = data['hourly']['time'][i];
-    let elementDate = new Date(element);
+async function fetchWeatherData(place){
+  let url = place.fetchUrl();
 
-    if (day == null) {
-      newDay(i, elementDate);
-
-    } else if (day == elementDate.getDate()) {
-      temperatures.push(data['hourly']['temperature_2m'][i]);
-
-    } else {
-      if (temperatures.length == 0) continue;
-
-      calculateThisDayValues(day);
-      newDay(i, elementDate);
-    }
-  }
-  calculateThisDayValues(day);
-}
-
-function calculateThisDayValues(day) {
-  temperatures.sort(function(a, b){return a-b});
-
-  let minimum = temperatures[0];
-  let maximum = temperatures[temperatures.length - 1];
-  let count = temperatures.length;
-  let median;
-  if (count % 2 == 0) {
-    let middleA = temperatures[count / 2];
-    let middleB = temperatures[(count / 2) - 1];
-    median = 0.5 * (middleA + middleB);
-  } else {
-    median = temperatures[Math.floor(0.5 * count)];
-  }
-
-  let sum = 0;
-  temperatures.forEach(t => sum += t);
-  let average = sum / count;
-  daysData.push(new DayData(day, minimum, maximum, average, median))
-}
-
-function newDay(i, elementDate) {
-  temperatures = [data['hourly']['temperature_2m'][i]];
-  day = elementDate.getDate();
-}
-
-function fetchWeatherData(){
-  let url = 'https://api.open-meteo.com/v1/forecast?latitude=50.0614&longitude=19.9366&hourly=temperature_2m,precipitation&past_days=21&forecast_days=0';
-
-  fetch(url)
+  let rawData = await fetch(url)
   .then(response => {
     // Check if the response status is OK (status code 200)
     if (!response.ok) {
@@ -94,74 +49,118 @@ function fetchWeatherData(){
     }
     return response.json();
   })
-  .then(rawData => {
-    data = rawData;
-    storeData(data);
-    calculateValuesForDays();
-    plotData();
-  })
   .catch(error => {
     console.error('Fetch error:', error);
   });
+  storeData(rawData, place);
+  return rawData;
 }
 
-function storeData(newData){
-  console.log('Storing new data:');
-  console.log(newData);
-  localStorage.setItem(dataKey, JSON.stringify(newData));
+function storeData(rawData, place){
+  localStorage.setItem(place.name, JSON.stringify(rawData));
   localStorage.setItem(storingDateKey, Date.now());
 }
 
-function plotData(){
-  let divContainer = document.getElementById('canvases');
-  for (let i = 0; i < places.length; i++) {
-    let canvas = document.createElement('canvas');
-    canvas.id = places[i];
-    divContainer.appendChild(canvas);
+function calculateValuesForDays(rawData) {
+  let day = null;
+  let daysTemperatures = [];
+  let daysData = [];
 
-    const context = document.getElementById(places[i]);
-    let chartData = daysData;
-  
-    new Chart(context, {
-      type: 'line',
-      data: {
-        labels: chartData.map(element => element.day),
-        datasets: [{
-          label: 'Minimum',
-          data: chartData.map(element => element.minimum),
-          borderWidth: 1
-        },{
-          label: 'Maximum',
-          data: chartData.map(element => element.maximum),
-          borderWidth: 1
-        },{
-          label: 'Average',
-          data: chartData.map(element => element.average),
-          borderWidth: 1
-        },{
-          label: 'Median',
-          data: chartData.map(element => element.median),
-          borderWidth: 1
-        },]
-      },
-      options: {
-        scales: {
-          y: {
-            beginAtZero: false,
-            position: 'right',
-            ticks: {
-              color: '#aaaaaa',
-            }
-          },
-          x: {
-            ticks: {
-              color: '#aaaaaa',
-            }
+  for (let i = 0; i < rawData['hourly']['time'].length; i++) {
+    const element = rawData['hourly']['time'][i];
+    let elementDate = new Date(element);
+
+    if (day == null) {
+      [day, daysTemperatures] = newDay(i, elementDate, rawData);
+
+    } else if (day == elementDate.getDate()) {
+      daysTemperatures.push(rawData['hourly']['temperature_2m'][i]);
+
+    } else {
+      if (daysTemperatures.length == 0) continue;
+
+      calculateThisDayValues(day, daysTemperatures, daysData);
+      [day, daysTemperatures] = newDay(i, elementDate, rawData);
+    }
+  }
+  calculateThisDayValues(day, daysTemperatures, daysData);
+  return daysData;
+}
+
+function newDay(i, elementDate, rawData) {
+  let daysTemperatures = [rawData['hourly']['temperature_2m'][i]];
+  return [elementDate.getDate(), daysTemperatures];
+}
+
+function calculateThisDayValues(day, daysTemperatures, daysData) {
+  daysTemperatures.sort(function(a, b){return a-b});
+
+  let minimum = daysTemperatures[0];
+  let maximum = daysTemperatures[daysTemperatures.length - 1];
+  let count = daysTemperatures.length;
+  let median;
+  if (count % 2 == 0) {
+    let middleA = daysTemperatures[count / 2];
+    let middleB = daysTemperatures[(count / 2) - 1];
+    median = 0.5 * (middleA + middleB);
+  } else {
+    median = daysTemperatures[Math.floor(0.5 * count)];
+  }
+
+  let sum = 0;
+  daysTemperatures.forEach(t => sum += t);
+  let average = sum / count;
+  daysData.push(new DayData(day, minimum, maximum, average, median))
+}
+
+function plotData(place, daysData){
+  let divContainer = document.getElementById('canvases');
+  let canvas = document.createElement('canvas');
+  canvas.id = place.name;
+  divContainer.appendChild(canvas);
+
+  const context = document.getElementById(place.name);
+  let chartData = daysData;
+
+  new Chart(context, {
+    type: 'line',
+    data: {
+      labels: chartData.map(element => element.day),
+      datasets: [{
+        label: 'Minimum',
+        data: chartData.map(element => element.minimum),
+        borderWidth: 1
+      },{
+        label: 'Maximum',
+        data: chartData.map(element => element.maximum),
+        borderWidth: 1
+      },{
+        label: 'Average',
+        data: chartData.map(element => element.average),
+        borderWidth: 1
+      },{
+        label: 'Median',
+        data: chartData.map(element => element.median),
+        borderWidth: 1
+      },]
+    },
+    options: {
+      scales: {
+        y: {
+          beginAtZero: false,
+          position: 'right',
+          ticks: {
+            color: '#aaaaaa',
+          }
+        },
+        x: {
+          ticks: {
+            color: '#aaaaaa',
           }
         }
       }
-    });
-  }
+    }
+  });
 }
 
 main();
