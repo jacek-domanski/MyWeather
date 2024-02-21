@@ -84,6 +84,7 @@ function calculateValuesForDays(rawData) {
     }
   }
   calculateThisDayValues(day, daysTemperatures, daysData);
+  calculateTrend(daysData);
   return daysData;
 }
 
@@ -111,6 +112,31 @@ function calculateThisDayValues(day, daysTemperatures, daysData) {
   daysTemperatures.forEach(t => sum += t);
   let average = sum / count;
   daysData.push(new DayData(day, minimum, maximum, average, median))
+}
+
+function calculateTrend(daysData) {
+  let daysSum = 0;
+  let temperaturesSum = 0;
+  for (let i = 0; i < daysData.length; i++) {
+    daysSum += i;
+    temperaturesSum += daysData[i].average;
+  }
+  let daysAverage = daysSum / daysData.length;
+  let temperaturesAverage = temperaturesSum / daysData.length;
+  let numerator = 0;
+  let denominator = 0;
+  
+  for (let i = 0; i < daysData.length; i++) {
+    numerator += (i - daysAverage) * (daysData[i].average - temperaturesAverage);
+    denominator += (i - daysAverage) * (i - daysAverage);
+  }
+  let slope = numerator / denominator;
+  let yOffset = temperaturesAverage - (slope * daysAverage);
+
+  for (let i = 0; i < daysData.length; i++) {
+    let trend = (slope * i) + yOffset;;
+    daysData[i].setTrend(trend);
+  }
 }
 
 function plotData(place, daysData){
@@ -142,6 +168,11 @@ function plotData(place, daysData){
         label: 'Median',
         data: chartData.map(element => element.median),
         borderWidth: 1
+      },{
+        label: 'Trend',
+        data: chartData.map(element => element.trend),
+        borderWidth: 1,
+        pointRadius: 1,
       },]
     },
     options: {

@@ -6,4 +6,8 @@ class DayData{
     this.average = average;
     this.median = median;
   }
+
+  setTrend(trend) {
+    this.trend = trend;
+  }
 }
