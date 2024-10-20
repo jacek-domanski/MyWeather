@@ -5,7 +5,7 @@ let places = []
 
 async function main() {
   places.push(new Place('Cracow', 50.0614, 19.9366));
-  places.push(new Place('Madeira', 32.795794, -16.891194));
+  places.push(new Place('Tenerife', 28.411515, -16.535813));
 
   for (let i = 0; i < places.length; i++) {
     let place = places[i];
