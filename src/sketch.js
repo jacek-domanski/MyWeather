@@ -1,6 +1,16 @@
 const dataKey = 'data';
 const storingDateKey = 'storingDay';
 
+// The API reports rainfall in mm but snowfall as snow DEPTH in cm. Snow density
+// depends on the temperature, so this is only an estimate of the water
+// equivalent, but it keeps both series on a single comparable axis.
+const SNOW_DEPTH_CM_TO_MM_WATER = 1;
+
+// Fields every cached payload must contain to be reusable. Caches written
+// before rain/snowfall were requested are missing 'rain'/'snowfall' and must be
+// treated as stale even when their date range still looks current.
+const REQUIRED_HOURLY_FIELDS = ['time', 'temperature_2m', 'rain', 'snowfall'];
+
 let places = []
 
 async function main() {
@@ -9,18 +19,56 @@ async function main() {
 
   for (let i = 0; i < places.length; i++) {
     let place = places[i];
-    let rawData = JSON.parse(localStorage.getItem(place.name));
+    let rawData = readCachedData(place);
 
-    if (rawData === null || !isDataUpToDate(rawData)){
+    if (rawData === null) {
       rawData = await fetchWeatherData(place);
+
+      // The request failed. Nothing is cached in that case, so a later visit can
+      // still recover; skip this place for now.
+      if (rawData === null) {
+        console.error('Skipping ' + place.name + ' - no data available');
+        continue;
+      }
+
       console.log('Downloading new data for ' + place.name);
     } else {
       console.log('Using existing data for ' + place.name);
     }
-    console.log(rawData);
+
     let daysData = calculateValuesForDays(rawData);
     plotData(place, daysData);
+    plotPrecipitationData(place, daysData);
   }
+}
+
+function hasRequiredFields(rawData) {
+  if (rawData === null || typeof rawData !== 'object') return false;
+
+  let hourly = rawData['hourly'];
+  if (hourly === null || typeof hourly !== 'object') return false;
+
+  return REQUIRED_HOURLY_FIELDS.every(field => hourly[field] !== undefined);
+}
+
+function readCachedData(place) {
+  let cached = localStorage.getItem(place.name);
+  if (cached === null) return null;
+
+  let rawData;
+
+  try {
+    rawData = JSON.parse(cached);
+  } catch (error) {
+    // A truncated or non-JSON entry would otherwise abort the whole run.
+    console.warn('Discarding unreadable cached data for ' + place.name);
+    localStorage.removeItem(place.name);
+    return null;
+  }
+
+  if (!hasRequiredFields(rawData) || !isDataUpToDate(rawData)) return null;
+
+  return rawData;
 }
 
 function isDataUpToDate(rawData){
@@ -41,59 +89,83 @@ function isDataUpToDate(rawData){
 async function fetchWeatherData(place){
   let url = place.fetchUrl();
 
-  let rawData = await fetch(url)
-  .then(response => {
-    // Check if the response status is OK (status code 200)
-    if (!response.ok) {
-      throw new Error(`HTTP error! Status: ${response.status}`);
-    }
-    return response.json();
-  })
-  .catch(error => {
+  try {
+    let rawData = await fetch(url)
+    .then(response => {
+      // Check if the response status is OK (status code 200)
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+      return response.json();
+    });
+
+    storeData(rawData, place);
+    return rawData;
+  } catch (error) {
+    // Return null instead of undefined so callers can tell "failed" from "empty".
     console.error('Fetch error:', error);
-  });
-  storeData(rawData, place);
-  return rawData;
+    return null;
+  }
 }
 
 function storeData(rawData, place){
+  if (rawData === null || rawData === undefined) return;
+
   localStorage.setItem(place.name, JSON.stringify(rawData));
   localStorage.setItem(storingDateKey, Date.now());
 }
 
 function calculateValuesForDays(rawData) {
-  let day = null;
-  let daysTemperatures = [];
+  let hourly = rawData['hourly'];
   let daysData = [];
 
-  for (let i = 0; i < rawData['hourly']['time'].length; i++) {
-    const element = rawData['hourly']['time'][i];
-    let elementDate = new Date(element);
+  // Both charts are derived from the same buckets, so their day boundaries can
+  // never disagree.
+  groupHoursByDay(hourly).forEach(group => {
+    let temperatures = group.indices.map(i => hourly['temperature_2m'][i]);
+    let dayData = calculateThisDayValues(group.day, temperatures);
 
-    if (day == null) {
-      [day, daysTemperatures] = newDay(i, elementDate, rawData);
+    calculatePrecipitationForDay(dayData, group.indices, hourly);
 
-    } else if (day == elementDate.getDate()) {
-      daysTemperatures.push(rawData['hourly']['temperature_2m'][i]);
+    daysData.push(dayData);
+  });
 
-    } else {
-      if (daysTemperatures.length == 0) continue;
-
-      calculateThisDayValues(day, daysTemperatures, daysData);
-      [day, daysTemperatures] = newDay(i, elementDate, rawData);
-    }
-  }
-  calculateThisDayValues(day, daysTemperatures, daysData);
   calculateTrend(daysData);
   return daysData;
 }
 
-function newDay(i, elementDate, rawData) {
-  let daysTemperatures = [rawData['hourly']['temperature_2m'][i]];
-  return [elementDate.getDate(), daysTemperatures];
+function groupHoursByDay(hourly) {
+  let times = hourly['time'];
+  let groups = [];
+
+  for (let i = 0; i < times.length; i++) {
+    let day = new Date(times[i]).getDate();
+
+    if (groups.length === 0 || groups[groups.length - 1].day !== day) {
+      groups.push({ day: day, indices: [] });
+    }
+
+    groups[groups.length - 1].indices.push(i);
+  }
+
+  return groups;
 }
 
-function calculateThisDayValues(day, daysTemperatures, daysData) {
+function calculatePrecipitationForDay(dayData, indices, hourly) {
+  let rainSum = 0;
+  let snowDepthCm = 0;
+
+  indices.forEach(i => {
+    rainSum += hourly['rain'][i];
+    snowDepthCm += hourly['snowfall'][i];
+  });
+
+  // The API's own 'precipitation' field is not rain + snowfall (it stays above
+  // zero in hours where both are zero), so values are derived per field.
+  dayData.setPrecipitation(rainSum, snowDepthCm * SNOW_DEPTH_CM_TO_MM_WATER);
+}
+
+function calculateThisDayValues(day, daysTemperatures) {
   daysTemperatures.sort(function(a, b){return a-b});
 
   let minimum = daysTemperatures[0];
@@ -111,7 +183,7 @@ function calculateThisDayValues(day, daysTemperatures, daysData) {
   let sum = 0;
   daysTemperatures.forEach(t => sum += t);
   let average = sum / count;
-  daysData.push(new DayData(day, minimum, maximum, average, median))
+  return new DayData(day, minimum, maximum, average, median)
 }
 
 function calculateTrend(daysData) {
@@ -137,6 +209,25 @@ function calculateTrend(daysData) {
     let trend = (slope * i) + yOffset;;
     daysData[i].setTrend(trend);
   }
+}
+
+function chartScales(beginAtZero) {
+  return {
+    scales: {
+      y: {
+        beginAtZero: beginAtZero,
+        position: 'right',
+        ticks: {
+          color: '#aaaaaa',
+        }
+      },
+      x: {
+        ticks: {
+          color: '#aaaaaa',
+        }
+      }
+    }
+  };
 }
 
 function plotData(place, daysData){
@@ -175,22 +266,35 @@ function plotData(place, daysData){
         pointRadius: 1,
       },]
     },
-    options: {
-      scales: {
-        y: {
-          beginAtZero: false,
-          position: 'right',
-          ticks: {
-            color: '#aaaaaa',
-          }
-        },
-        x: {
-          ticks: {
-            color: '#aaaaaa',
-          }
-        }
-      }
-    }
+    options: chartScales(false)
+  });
+}
+
+function plotPrecipitationData(place, daysData){
+  let divContainer = document.getElementById('precipitationCanvases');
+  let canvas = document.createElement('canvas');
+  canvas.id = place.name + '-precipitation';
+  divContainer.appendChild(canvas);
+
+  // One dataset per quantity, so Chart.js draws them side by side and a day
+  // with no snow simply shows a single rain bar.
+  new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: daysData.map(element => element.day),
+      datasets: [{
+        label: 'Rain (mm)',
+        data: daysData.map(element => element.rain),
+        backgroundColor: 'rgba(54, 162, 235, 0.6)',
+        borderColor: 'rgba(54, 162, 235, 1)',
+      },{
+        label: 'Snow (mm water equivalent)',
+        data: daysData.map(element => element.snow),
+        backgroundColor: 'rgba(231, 222, 231, 0.6)',
+        borderColor: 'rgba(231, 222, 231, 1)',
+      },]
+    },
+    options: chartScales(true)
   });
 }
 

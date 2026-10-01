@@ -11,7 +11,7 @@ class Place{
       + this.latitude.toFixed(4)
       + '&longitude='
       + this.longitude.toFixed(4)
-      + '&hourly=temperature_2m,precipitation&past_days=21&forecast_days=0';
+      + '&hourly=temperature_2m,precipitation,rain,snowfall&past_days=21&forecast_days=0';
       
     return url;
   }
