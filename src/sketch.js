@@ -414,7 +414,12 @@ function makeEditable(span, description, onActivate) {
   span.title = 'Click to edit the ' + description;
   span.tabIndex = 0;
 
-  span.addEventListener('click', onActivate);
+  span.addEventListener('click', event => {
+    // A click that lands on the input inside this span is handled by the
+    // editor itself; treating it as activation would restart the edit.
+    if (event.target === span) onActivate();
+  });
+
   span.addEventListener('keydown', event => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
@@ -477,6 +482,13 @@ function startEditing(span, currentValue, options) {
   }
 
   input.addEventListener('keydown', event => {
+    // The input lives inside the span, which has its own keydown handler for
+    // activating the editor. Without stopping propagation, a keystroke here
+    // bubbles up and re-triggers it: the span's Space handling would
+    // preventDefault and swallow the character, and its Enter handling would
+    // reopen the editor moments after this one closed it.
+    event.stopPropagation();
+
     if (event.key === 'Enter') {
       event.preventDefault();
       commit();
@@ -487,8 +499,12 @@ function startEditing(span, currentValue, options) {
   });
 
   // Escape cancels but still fires blur, so the guard above keeps the cancelled
-  // edit from being committed.
-  input.addEventListener('blur', commit);
+  // edit from being committed. Blur is stopped for the same reason as keydown:
+  // a click on the span must not be seen as activating the editor.
+  input.addEventListener('blur', event => {
+    event.stopPropagation();
+    commit();
+  });
 }
 
 function startEditingName(place, span) {
