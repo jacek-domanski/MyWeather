@@ -1,6 +1,12 @@
 const dataKey = 'data';
 const storingDateKey = 'storingDay';
 const namesKey = 'placeNames';
+const coordinatesKey = 'placeCoordinates';
+
+// Coordinates are shown next to the name as deliberately quiet text, and lighten
+// to the normal label gray only while being edited.
+const COORDINATES_COLOR = '#3b3b3b';
+const COORDINATES_FONT_SIZE = '13px';
 
 // The API reports rainfall in mm but snowfall as snow DEPTH in cm. Snow density
 // depends on the temperature, so this is only an estimate of the water
@@ -13,7 +19,8 @@ const SNOW_DEPTH_CM_TO_MM_WATER = 1;
 const REQUIRED_HOURLY_FIELDS = ['time', 'temperature_2m', 'rain', 'snowfall'];
 
 // Shared by the axis ticks, the place names and the rename input so all text on
-// the page reads as the same gray.
+// the page reads as the same gray. COORDINATES_EDITING_COLOR is this same gray,
+// which the coordinates lighten to while being edited.
 const LABEL_COLOR = '#aaaaaa';
 const LABEL_FONT = 'Lato, sans-serif';
 
@@ -23,6 +30,7 @@ async function main() {
   places.push(new Place('cracow', 'Cracow', 50.0614, 19.9366));
   places.push(new Place('tenerife', 'Tenerife', 28.411515, -16.535813));
   applyStoredNames();
+  applyStoredCoordinates();
 
   for (let i = 0; i < places.length; i++) {
     let place = places[i];
@@ -50,22 +58,7 @@ async function main() {
 }
 
 function loadNameOverrides() {
-  let stored = localStorage.getItem(namesKey);
-  if (stored === null) return {};
-
-  let parsed;
-
-  try {
-    parsed = JSON.parse(stored);
-  } catch (error) {
-    console.warn('Discarding unreadable stored place names');
-    localStorage.removeItem(namesKey);
-    return {};
-  }
-
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-
-  return parsed;
+  return loadObjectStore(namesKey, 'place names');
 }
 
 function saveName(place, name) {
@@ -85,6 +78,80 @@ function applyStoredNames() {
   });
 }
 
+function loadObjectStore(key, description) {
+  let stored = localStorage.getItem(key);
+  if (stored === null) return {};
+
+  let parsed;
+
+  try {
+    parsed = JSON.parse(stored);
+  } catch (error) {
+    console.warn('Discarding unreadable stored ' + description);
+    localStorage.removeItem(key);
+    return {};
+  }
+
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+
+  return parsed;
+}
+
+function formatCoordinates(place) {
+  return place.latitude.toFixed(4) + ', ' + place.longitude.toFixed(4);
+}
+
+// Strictly "latitude, longitude", matching both the Open-Meteo parameter order
+// and the order the coordinates are displayed in. The two orders are not
+// distinguishable from the text alone (91 is a valid longitude), so an
+// out-of-order or out-of-range value is rejected rather than guessed at: a
+// silently relocated place is far worse than a refused edit.
+function parseCoordinates(text) {
+  let parts = text.split(',').map(part => part.trim()).filter(part => part !== '');
+
+  if (parts.length !== 2) return null;
+
+  let numbers = parts.map(part => Number(part));
+  if (numbers.some(value => !isFinite(value))) return null;
+
+  let [latitude, longitude] = numbers;
+
+  if (!isLatitude(latitude) || !isLongitude(longitude)) return null;
+
+  return { latitude: latitude, longitude: longitude };
+}
+
+function isLatitude(value) {
+  return value >= -90 && value <= 90;
+}
+
+function isLongitude(value) {
+  return value >= -180 && value <= 180;
+}
+
+function saveCoordinates(place, latitude, longitude) {
+  let stored = loadObjectStore(coordinatesKey, 'place coordinates');
+  stored[place.id] = { latitude: latitude, longitude: longitude };
+  localStorage.setItem(coordinatesKey, JSON.stringify(stored));
+}
+
+function applyStoredCoordinates() {
+  let stored = loadObjectStore(coordinatesKey, 'place coordinates');
+
+  places.forEach(place => {
+    let entry = stored[place.id];
+    if (entry === null || typeof entry !== 'object') return;
+
+    let latitude = Number(entry.latitude);
+    let longitude = Number(entry.longitude);
+
+    if (isFinite(latitude) && isFinite(longitude) && isLatitude(latitude) && isLongitude(longitude)) {
+      place.latitude = latitude;
+      place.longitude = longitude;
+    }
+  });
+}
+
 function hasRequiredFields(rawData) {
   if (rawData === null || typeof rawData !== 'object') return false;
 
@@ -98,10 +165,10 @@ function readCachedData(place) {
   let cached = localStorage.getItem(place.id);
   if (cached === null) return null;
 
-  let rawData;
+  let entry;
 
   try {
-    rawData = JSON.parse(cached);
+    entry = JSON.parse(cached);
   } catch (error) {
     // A truncated or non-JSON entry would otherwise abort the whole run.
     console.warn('Discarding unreadable cached data for ' + place.name);
@@ -109,6 +176,17 @@ function readCachedData(place) {
     return null;
   }
 
+  // Entries are stored wrapped with the coordinates they were fetched for. A
+  // bare payload, or one for different coordinates, means the place was moved
+  // and the data no longer describes it.
+  if (entry === null || typeof entry !== 'object' || entry['data'] === undefined) {
+    localStorage.removeItem(place.id);
+    return null;
+  }
+
+  let rawData = entry['data'];
+
+  if (entry['coordinates'] !== formatCoordinates(place)) return null;
   if (!hasRequiredFields(rawData) || !isDataUpToDate(rawData)) return null;
 
   return rawData;
@@ -154,7 +232,10 @@ async function fetchWeatherData(place){
 function storeData(rawData, place){
   if (rawData === null || rawData === undefined) return;
 
-  localStorage.setItem(place.id, JSON.stringify(rawData));
+  // Stored with the coordinates it was fetched for, so editing a place's
+  // location invalidates the entry instead of showing the old area's weather.
+  let entry = { coordinates: formatCoordinates(place), data: rawData };
+  localStorage.setItem(place.id, JSON.stringify(entry));
   localStorage.setItem(storingDateKey, Date.now());
 }
 
@@ -318,38 +399,66 @@ function createNameLabel(place, visible) {
     return label;
   }
 
-  label.textContent = place.name;
-  label.style.cursor = 'text';
-  label.title = 'Click to rename this location';
-  label.tabIndex = 0;
-
-  label.addEventListener('click', () => startEditingName(place, label));
-  label.addEventListener('keydown', event => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      startEditingName(place, label);
-    }
-  });
+  label.appendChild(createNameField(place));
+  // One space of separation, matching how the two read on a single line.
+  label.appendChild(document.createTextNode(' '));
+  label.appendChild(createCoordinatesField(place));
 
   return label;
 }
 
-function startEditingName(place, label) {
-  // Guard against a second click stacking a second input inside the same label.
-  if (label.querySelector('input') !== null) return;
+// Wires a span to be click- and keyboard-editable. Both fields behave the same
+// way, so the activation handling lives here rather than being repeated.
+function makeEditable(span, description, onActivate) {
+  span.style.cursor = 'text';
+  span.title = 'Click to edit the ' + description;
+  span.tabIndex = 0;
+
+  span.addEventListener('click', onActivate);
+  span.addEventListener('keydown', event => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      onActivate();
+    }
+  });
+
+  return span;
+}
+
+function createNameField(place) {
+  let span = document.createElement('span');
+  span.textContent = place.name;
+
+  return makeEditable(span, 'location name', () => startEditingName(place, span));
+}
+
+function createCoordinatesField(place) {
+  let span = document.createElement('span');
+  span.textContent = formatCoordinates(place);
+  span.style.color = COORDINATES_COLOR;
+  span.style.fontSize = COORDINATES_FONT_SIZE;
+
+  return makeEditable(span, 'coordinates', () => startEditingCoordinates(place, span));
+}
+
+// Shared by the name and coordinate editors: swaps a span for a text input and
+// resolves exactly once, whether via Enter, blur or Escape.
+function startEditing(span, currentValue, options) {
+  // Guard against a second click stacking a second input in the same span.
+  if (span.querySelector('input') !== null) return;
 
   let input = document.createElement('input');
   input.type = 'text';
-  input.value = place.name;
-  input.style.color = LABEL_COLOR;
+  input.value = currentValue;
+  input.style.color = options.editingColor;
   input.style.backgroundColor = 'transparent';
   input.style.border = '1px solid #555555';
   input.style.fontFamily = LABEL_FONT;
-  input.style.fontSize = '18px';
-  input.style.width = '300px';
+  input.style.fontSize = options.fontSize;
+  input.style.width = options.inputWidth;
 
-  label.textContent = '';
-  label.appendChild(input);
+  span.textContent = '';
+  span.appendChild(input);
   input.focus();
   input.select();
 
@@ -358,23 +467,13 @@ function startEditingName(place, label) {
   function commit() {
     if (finished) return;
     finished = true;
-
-    let value = input.value.trim();
-
-    // An empty name is treated as "no change" so a place is never left blank.
-    if (value === '' || value === place.name) {
-      label.textContent = place.name;
-      return;
-    }
-
-    place.name = value;
-    saveName(place, value);
+    options.onCommit(input.value.trim());
   }
 
   function cancel() {
     if (finished) return;
     finished = true;
-    label.textContent = place.name;
+    options.onCancel();
   }
 
   input.addEventListener('keydown', event => {
@@ -387,9 +486,64 @@ function startEditingName(place, label) {
     }
   });
 
-  // Escape cancels but still fires blur, so the guard above keeps the original
-  // name from being overwritten by the cancelled edit.
+  // Escape cancels but still fires blur, so the guard above keeps the cancelled
+  // edit from being committed.
   input.addEventListener('blur', commit);
+}
+
+function startEditingName(place, span) {
+  startEditing(span, place.name, {
+    editingColor: LABEL_COLOR,
+    fontSize: '18px',
+    inputWidth: '300px',
+    onCancel: () => { span.textContent = place.name; },
+    onCommit: value => {
+      // A blank name is treated as "no change" so a place is never left unnamed.
+      if (value === '' || value === place.name) {
+        span.textContent = place.name;
+        return;
+      }
+
+      place.name = value;
+      saveName(place, value);
+      span.textContent = value;
+    },
+  });
+}
+
+function startEditingCoordinates(place, span) {
+  startEditing(span, formatCoordinates(place), {
+    editingColor: LABEL_COLOR,
+    fontSize: COORDINATES_FONT_SIZE,
+    inputWidth: '180px',
+    onCancel: () => {
+      span.textContent = formatCoordinates(place);
+      span.style.color = COORDINATES_COLOR;
+    },
+    onCommit: value => {
+      let parsed = parseCoordinates(value);
+
+      if (parsed === null) {
+        console.warn('Ignoring invalid coordinates "' + value + '"');
+        span.textContent = formatCoordinates(place);
+        span.style.color = COORDINATES_COLOR;
+        return;
+      }
+
+      place.latitude = parsed.latitude;
+      place.longitude = parsed.longitude;
+
+      saveCoordinates(place, parsed.latitude, parsed.longitude);
+
+      span.textContent = formatCoordinates(place);
+      span.style.color = COORDINATES_COLOR;
+
+      // The cached payload belongs to the old position, so drop it and reload
+      // rather than showing stale weather for the new one.
+      localStorage.removeItem(place.id);
+      window.location.reload();
+    },
+  });
 }
 
 function plotData(place, daysData){
