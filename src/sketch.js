@@ -82,11 +82,11 @@ function toPlace(record, takenIds) {
   let longitude = isValidLongitude(record.longitude) ? record.longitude : 0;
 
   // A place added by the plus button has no location yet, so it must not be
-  // fetched until coordinates are given. Derive that from the record too, so a
-  // reload does not turn a placeholder into a real fetch.
-  let // 'pending' is authoritative rather than derived from the coordinates: a
-  // freshly added place starts at 0,0, which are themselves valid values, so
-  // they cannot stand in for "no location yet".
+  // fetched until coordinates are given. The stored flag is authoritative
+  // rather than being derived from the coordinates, because a freshly added
+  // place starts at 0,0 which are themselves valid values and so cannot stand
+  // in for "no location yet". Invalid coordinates still force pending, so a
+  // damaged record cannot turn into a real fetch.
   let pending = record.pending === true
     || !isValidLatitude(record.latitude)
     || !isValidLongitude(record.longitude);
