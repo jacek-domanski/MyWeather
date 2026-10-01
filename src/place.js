@@ -1,5 +1,5 @@
 class Place{
-  constructor(id, name, latitude, longitude){
+  constructor(id, name, latitude, longitude, pending = false){
     // 'id' is stable and never shown to the user; 'name' is editable and is
     // what gets displayed. Storage keys must use the id, otherwise renaming a
     // place would orphan its cached data and duplicate names would collide.
@@ -7,6 +7,9 @@ class Place{
     this.name = name;
     this.latitude = latitude;
     this.longitude = longitude;
+    // Set for a freshly added place with no location chosen yet. Such a place is
+    // not fetched until coordinates are entered.
+    this.pending = pending;
   }
 
   fetchUrl() {

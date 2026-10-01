@@ -5,14 +5,15 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Lato:wght@400&display=swap" rel="stylesheet">
   </head>
-  <body bgcolor="222222">
+  <body bgcolor="#222222">
     <main>
-		<div id="charts" style="display: flex; width: 100%; gap: 40px;">
-			<div id="canvases" style="display: flex; flex-direction: column; gap: 40px; flex: 1;">
-			</div>
-			<div id="precipitationCanvases" style="display: flex; flex-direction: column; gap: 40px; flex: 1;">
-			</div>
-		</div>
+      <!-- One row per place; each row holds the temperature and precipitation
+           charts side by side. Rows stack down the page, so adding locations
+           scrolls rather than shrinking the charts. -->
+      <div id="charts" style="display: flex; flex-direction: column; gap: 40px;">
+      </div>
+      <div id="pageControls" style="display: flex; gap: 8px; margin-top: 40px; padding-bottom: 40px;">
+      </div>
     </main>
 	<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="src/dayData.js"></script>
