@@ -1,0 +1,60 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  "permissions": [
+    // Wszystkie polecenia shell wymagają zgody,
+    // z wyjątkami zdefiniowanymi poniżej.
+    { "action": "shell", "resource": "*", "effect": "ask" },
+
+    // Bez pytania można wykonywać tylko inspekcję Git.
+    { "action": "shell", "resource": "git status *", "effect": "allow" },
+    { "action": "shell", "resource": "git diff *", "effect": "allow" },
+    { "action": "shell", "resource": "git log *", "effect": "allow" },
+    { "action": "shell", "resource": "git branch *", "effect": "allow" },
+
+    // Operacje, których agent nie może wykonać nawet po przypadkowym
+    // "Allow always".
+    { "action": "shell", "resource": "git push *", "effect": "deny" },
+    { "action": "shell", "resource": "git reset --hard *", "effect": "deny" },
+    { "action": "shell", "resource": "git clean *", "effect": "deny" },
+    { "action": "shell", "resource": "rm *", "effect": "deny" },
+    { "action": "shell", "resource": "sudo *", "effect": "deny" },
+
+    // Sekrety.
+    { "action": "read", "resource": "*.env", "effect": "deny" },
+    { "action": "read", "resource": "*.env.*", "effect": "deny" },
+
+    // Dostęp poza repo wymaga każdorazowo zgody.
+    { "action": "external_directory", "resource": "*", "effect": "ask" }
+  ],
+
+  "experimental": {
+    "policies": [
+      // Hard deny — nie można tego zaakceptować przez "Allow always".
+      {
+        "action": "permission",
+        "resource": "shell:git push *",
+        "effect": "deny"
+      },
+
+      // Hard deny dla sekretów.
+      {
+        "action": "permission",
+        "resource": "read:*.env",
+        "effect": "deny"
+      },
+      {
+        "action": "permission",
+        "resource": "read:*.env.*",
+        "effect": "deny"
+      },
+
+      // Nie pozwalamy agentowi czytać materiałów SSH.
+      {
+        "action": "permission",
+        "resource": "read:*/.ssh/*",
+        "effect": "deny"
+      }
+    ]
+  }
+}
